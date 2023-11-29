@@ -1995,6 +1995,10 @@ If you need to force permanent unstable updates for a package, you can add a pac
 
 Also check out the `followTag` configuration option above if you wish Renovate to keep you pinned to a particular release tag.
 
+## includMirrors
+
+By default, Renovate skips mirror repos. Set this flag to include mirror repos.
+
 ## includePaths
 
 If you wish for Renovate to process only select paths in the repository, use `includePaths`.

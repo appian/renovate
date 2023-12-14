@@ -1,7 +1,6 @@
 {
   "plugins": [
     "@semantic-release/commit-analyzer",
-    "@semantic-release/release-notes-generator",
     [
       "@semantic-release/github",
       {
@@ -14,7 +13,6 @@
         ]
       }
     ],
-    "@semantic-release/npm",
     [
       "@semantic-release/exec",
       {
@@ -91,8 +89,7 @@
   },
   "tagFormat": "${version}",
   "branches": [
-    {
-      "name": "main"
-    }
+    { "name": "main" },
+    { "name": "gitlab-forked-from-project" }
   ]
 }

@@ -100,6 +100,7 @@ let config: {
   cloneSubmodulesFilter: string[] | undefined;
   ignorePrAuthor: boolean | undefined;
   squash: boolean;
+  mergeRequestRepository: string;
 } = {} as any;
 
 export function resetPlatform(): void {
@@ -332,6 +333,8 @@ export async function initRepo({
         res.body.squash_option === 'default_on';
     }
     logger.debug(`${repository} default branch = ${config.defaultBranch}`);
+    config.mergeRequestRepository =
+      res.body.forked_from_project?.id ?? config.repository;
     logger.debug('Enabling Git FS');
     const url = getRepoUrl(repository, gitUrl, res);
     await git.initRepo({
@@ -525,7 +528,7 @@ export async function getPrList(): Promise<Pr[]> {
 
 async function ignoreApprovals(pr: number): Promise<void> {
   try {
-    const url = `projects/${config.repository}/merge_requests/${pr}/approval_rules`;
+    const url = `projects/${config.mergeRequestRepository}/merge_requests/${pr}/approval_rules`;
     const { body: rules } = await gitlabApi.getJsonUnchecked<
       {
         name: string;
@@ -618,7 +621,7 @@ async function tryPrAutomerge(
           pipeline: {
             status: string;
           };
-        }>(`projects/${config.repository}/merge_requests/${pr}`, {
+        }>(`projects/${config.mergeRequestRepository}/merge_requests/${pr}`, {
           memCache: false,
         });
 
@@ -669,7 +672,7 @@ async function tryPrAutomerge(
         try {
           if (useMergeTrain) {
             await gitlabApi.postJson(
-              `projects/${config.repository}/merge_trains/merge_requests/${pr}`,
+              `projects/${config.mergeRequestRepository}/merge_trains/merge_requests/${pr}`,
               {
                 body: {
                   auto_merge: true,
@@ -678,7 +681,7 @@ async function tryPrAutomerge(
             );
           } else {
             await gitlabApi.putJson(
-              `projects/${config.repository}/merge_requests/${pr}/merge`,
+              `projects/${config.mergeRequestRepository}/merge_requests/${pr}/merge`,
               {
                 body: {
                   should_remove_source_branch: true,
@@ -711,7 +714,7 @@ async function approveMr(mrNumber: number): Promise<void> {
   logger.debug(`approveMr(${mrNumber})`);
   try {
     await gitlabApi.postJson(
-      `projects/${config.repository}/merge_requests/${mrNumber}/approve`,
+      `projects/${config.mergeRequestRepository}/merge_requests/${mrNumber}/approve`,
       opts,
     );
   } catch (err) {
@@ -745,6 +748,10 @@ export async function createPr({
         description,
         labels: (labels ?? []).join(','),
         squash: config.squash,
+        // the creation is always against the repository with the branch
+        // but if the target_project_id is forked_from_project, then the Merge
+        // Request will end up in that repository
+        target_project_id: config.mergeRequestRepository,
       },
     },
   );
@@ -769,7 +776,7 @@ export async function createPr({
 
 export async function getPr(iid: number): Promise<GitlabPr> {
   logger.debug(`getPr(${iid})`);
-  const mr = await getMR(config.repository, iid);
+  const mr = await getMR(config.mergeRequestRepository, iid);
 
   // Harmonize fields with GitHub
   return prInfo(mr);
@@ -814,7 +821,7 @@ export async function updatePr({
 
   const updatedPrInfo = (
     await gitlabApi.putJson<GitLabMergeRequest>(
-      `projects/${config.repository}/merge_requests/${iid}`,
+      `projects/${config.mergeRequestRepository}/merge_requests/${iid}`,
       { body },
     )
   ).body;
@@ -822,7 +829,7 @@ export async function updatePr({
   const updatedPr = prInfo(updatedPrInfo);
   await GitlabPrCache.setPr(
     gitlabApi,
-    config.repository,
+    config.mergeRequestRepository,
     botUserName,
     updatedPr,
     !!config.ignorePrAuthor,
@@ -845,7 +852,7 @@ export async function reattemptPlatformAutomerge({
 export async function mergePr({ id }: MergePRConfig): Promise<boolean> {
   try {
     await gitlabApi.putJson(
-      `projects/${config.repository}/merge_requests/${id}/merge`,
+      `projects/${config.mergeRequestRepository}/merge_requests/${id}/merge`,
       {
         body: {
           should_remove_source_branch: true,
@@ -978,6 +985,7 @@ export async function setBranchStatus({
   state: renovateState,
   url: targetUrl,
 }: BranchStatusConfig): Promise<void> {
+  const branchSourceProject = config.repository;
   // First, get the branch commit SHA
   const branchSha = git.getBranchCommit(branchName);
   if (!branchSha) {
@@ -985,7 +993,7 @@ export async function setBranchStatus({
     return;
   }
   // Now, check the statuses for that commit
-  const url = `projects/${config.repository}/statuses/${branchSha}`;
+  const url = `projects/${branchSourceProject}/statuses/${branchSha}`;
   let state = 'success';
   if (renovateState === 'yellow') {
     state = 'pending';
@@ -1079,7 +1087,7 @@ export async function getIssueList(): Promise<GitlabIssue[]> {
     const query = getQueryString(searchParams);
     const res = await gitlabApi.getJsonUnchecked<
       { iid: number; title: string; labels: string[] }[]
-    >(`projects/${config.repository}/issues?${query}`, {
+    >(`projects/${config.mergeRequestRepository}/issues?${query}`, {
       memCache: false,
       paginate: true,
     });
@@ -1111,7 +1119,7 @@ export async function getIssue(
     }
     const issueBody = (
       await gitlabApi.getJsonUnchecked<{ description: string }>(
-        `projects/${config.repository}/issues/${number}`,
+        `projects/${config.mergeRequestRepository}/issues/${number}`,
         opts,
       )
     ).body.description;
@@ -1156,13 +1164,13 @@ export async function ensureIssue({
     if (issue) {
       const existingDescription = (
         await gitlabApi.getJsonUnchecked<{ description: string }>(
-          `projects/${config.repository}/issues/${issue.iid}`,
+          `projects/${config.mergeRequestRepository}/issues/${issue.iid}`,
         )
       ).body.description;
       if (issue.title !== title || existingDescription !== description) {
         logger.debug('Updating issue');
         await gitlabApi.putJson(
-          `projects/${config.repository}/issues/${issue.iid}`,
+          `projects/${config.mergeRequestRepository}/issues/${issue.iid}`,
           {
             body: {
               title,
@@ -1175,14 +1183,17 @@ export async function ensureIssue({
         return 'updated';
       }
     } else {
-      await gitlabApi.postJson(`projects/${config.repository}/issues`, {
-        body: {
-          title,
-          description,
-          labels: (labels ?? []).join(','),
-          confidential: confidential ?? false,
+      await gitlabApi.postJson(
+        `projects/${config.mergeRequestRepository}/issues`,
+        {
+          body: {
+            title,
+            description,
+            labels: (labels ?? []).join(','),
+            confidential: confidential ?? false,
+          },
         },
-      });
+      );
       logger.info('Issue created');
       // delete issueList so that it will be refetched as necessary
       delete config.issueList;
@@ -1205,7 +1216,7 @@ export async function ensureIssueClosing(title: string): Promise<void> {
     if (issue.title === title) {
       logger.debug({ issue }, 'Closing issue');
       await gitlabApi.putJson(
-        `projects/${config.repository}/issues/${issue.iid}`,
+        `projects/${config.mergeRequestRepository}/issues/${issue.iid}`,
         {
           body: { state_event: 'close' },
         },
@@ -1296,7 +1307,7 @@ export async function addReviewers(
   newReviewerIDs = [...new Set(newReviewerIDs)];
 
   try {
-    await updateMR(config.repository, iid, {
+    await updateMR(config.mergeRequestRepository, iid, {
       reviewer_ids: [...existingReviewerIDs, ...newReviewerIDs],
     });
   } catch (err) {
@@ -1315,7 +1326,7 @@ export async function deleteLabel(
       .filter((l: string) => l !== label)
       .join(',');
     await gitlabApi.putJson(
-      `projects/${config.repository}/merge_requests/${issueNo}`,
+      `projects/${config.mergeRequestRepository}/merge_requests/${issueNo}`,
       {
         body: { labels },
       },
@@ -1328,7 +1339,7 @@ export async function deleteLabel(
 async function getComments(issueNo: number): Promise<GitlabComment[]> {
   // GET projects/:owner/:repo/merge_requests/:number/notes
   logger.debug(`Getting comments for #${issueNo}`);
-  const url = `projects/${config.repository}/merge_requests/${issueNo}/notes`;
+  const url = `projects/${config.mergeRequestRepository}/merge_requests/${issueNo}/notes`;
   const comments = (
     await gitlabApi.getJsonUnchecked<GitlabComment[]>(url, { paginate: true })
   ).body;
@@ -1339,7 +1350,7 @@ async function getComments(issueNo: number): Promise<GitlabComment[]> {
 async function addComment(issueNo: number, body: string): Promise<void> {
   // POST projects/:owner/:repo/merge_requests/:number/notes
   await gitlabApi.postJson(
-    `projects/${config.repository}/merge_requests/${issueNo}/notes`,
+    `projects/${config.mergeRequestRepository}/merge_requests/${issueNo}/notes`,
     {
       body: { body },
     },
@@ -1353,7 +1364,7 @@ async function editComment(
 ): Promise<void> {
   // PUT projects/:owner/:repo/merge_requests/:number/notes/:id
   await gitlabApi.putJson(
-    `projects/${config.repository}/merge_requests/${issueNo}/notes/${commentId}`,
+    `projects/${config.mergeRequestRepository}/merge_requests/${issueNo}/notes/${commentId}`,
     {
       body: { body },
     },
@@ -1366,7 +1377,7 @@ async function deleteComment(
 ): Promise<void> {
   // DELETE projects/:owner/:repo/merge_requests/:number/notes/:id
   await gitlabApi.deleteJson(
-    `projects/${config.repository}/merge_requests/${issueNo}/notes/${commentId}`,
+    `projects/${config.mergeRequestRepository}/merge_requests/${issueNo}/notes/${commentId}`,
   );
 }
 

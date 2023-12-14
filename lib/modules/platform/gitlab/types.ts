@@ -42,7 +42,6 @@ export interface RepoResponse {
   empty_repo: boolean;
   ssh_url_to_repo: string | null;
   http_url_to_repo: string | null;
-  forked_from_project: boolean;
   repository_access_level: 'disabled' | 'private' | 'enabled';
   merge_requests_access_level: 'disabled' | 'private' | 'enabled';
   merge_method: MergeMethod;
@@ -53,6 +52,9 @@ export interface RepoResponse {
   merge_trains_enabled?: boolean;
   path_with_namespace: string;
   squash_option?: 'never' | 'always' | 'default_on' | 'default_off';
+  forked_from_project?: {
+    id: string;
+  };
 }
 
 // See https://gitlab.com/gitlab-org/gitlab/-/blob/master/app/graphql/types/user_status_type.rb

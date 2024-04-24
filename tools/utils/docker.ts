@@ -59,6 +59,7 @@ export async function bake(
   args.push(target);
 
   for (let tries = opts.tries ?? 0; tries >= 0; tries--) {
+    console.log(`Running docker ${args}`);
     const result = exec(`docker`, args);
     if (result.signal) {
       logger.error(`Signal received: ${result.signal}`);

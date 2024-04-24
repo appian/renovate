@@ -14,6 +14,7 @@ COPY . /app
 WORKDIR /app
 
 RUN \
+  corepack prepare pnpm@9.0.6 --activate && \
   pnpm install && \
   pnpm build && \
   npm pack

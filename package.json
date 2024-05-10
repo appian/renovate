@@ -71,7 +71,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/renovatebot/renovate.git"
+    "url": "git+https://github.com/appian/renovate.git"
   },
   "keywords": [
     "automated",

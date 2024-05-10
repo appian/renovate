@@ -27,26 +27,26 @@ void (async () => {
 
   if (meta?.['push-slim']?.['containerimage.digest']) {
     sign(
-      `ghcr.io/renovatebot/renovate@${meta['push-slim']['containerimage.digest']}`,
+      `ghcr.io/appian/renovate@${meta['push-slim']['containerimage.digest']}`,
       opts,
     );
-    sign(
-      `renovate/renovate@${meta['push-slim']['containerimage.digest']}`,
-      opts,
-    );
+    // sign(
+    //   `renovate/renovate@${meta['push-slim']['containerimage.digest']}`,
+    //   opts,
+    // );
   } else {
     logger.warn('Skip signing, missing metadata for slim image');
   }
 
   if (meta?.['push-full']?.['containerimage.digest']) {
     sign(
-      `ghcr.io/renovatebot/renovate@${meta['push-full']['containerimage.digest']}`,
+      `ghcr.io/appian/renovate@${meta['push-full']['containerimage.digest']}`,
       opts,
     );
-    sign(
-      `renovate/renovate@${meta['push-full']['containerimage.digest']}`,
-      opts,
-    );
+    // sign(
+    //   `renovate/renovate@${meta['push-full']['containerimage.digest']}`,
+    //   opts,
+    // );
   } else {
     logger.warn('Skip signing, missing metadata for full image');
   }

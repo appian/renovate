@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - gitlab-forked-from-project
 
   pull_request:
     types:
@@ -614,7 +615,7 @@ jobs:
       - codecov
       - coverage-threshold
 
-    if: github.repository == 'renovatebot/renovate' && github.event_name != 'pull_request'
+    # if: github.repository == 'renovatebot/renovate' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -646,7 +647,7 @@ jobs:
 
       - name: Docker registry login
         run: |
-          echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
+          # echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.repository_owner }} --password-stdin
 
       - name: Check dry run
@@ -661,8 +662,8 @@ jobs:
 
       - name: semantic-release
         run: |
-          pnpm semantic-release --dry-run ${{env.DRY_RUN}}
+          pnpm semantic-release --dry-run false
         env:
-          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }} # TODO: use action token?
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # TODO: use action token?
+          # NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           LOG_LEVEL: debug

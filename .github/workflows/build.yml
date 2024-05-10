@@ -6,6 +6,7 @@ on:
       - main
       - next
       - maint/**
+      - gitlab-forked-from-project
 
   pull_request:
     types:
@@ -918,7 +919,7 @@ jobs:
       - codecov
       - coverage-threshold
 
-    if: github.repository == 'renovatebot/renovate' && github.event_name != 'pull_request'
+    # if: github.repository == 'renovatebot/renovate' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     concurrency:
@@ -983,7 +984,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           REPOSITORY_OWNER: ${{ github.repository_owner }}
         run: |
-          echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+          # echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
           echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$REPOSITORY_OWNER" --password-stdin
 
       - name: Setup uv
@@ -1026,7 +1027,7 @@ jobs:
       - name: semantic-release
         id: release
         run: |
-          pnpm semantic-release --dry-run "$DRY_RUN"
+          pnpm semantic-release --dry-run false
         env:
           GITHUB_TOKEN: ${{ github.token }}
           LOG_LEVEL: debug

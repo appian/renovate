@@ -669,7 +669,7 @@ const options: RenovateOptions[] = [
     stage: 'repository',
     type: 'string',
     globalOnly: true,
-    supportedPlatforms: ['github'],
+    supportedPlatforms: ['github', 'gitlab'],
     experimental: true,
   },
   {
@@ -679,7 +679,7 @@ const options: RenovateOptions[] = [
     stage: 'repository',
     type: 'string',
     globalOnly: true,
-    supportedPlatforms: ['github'],
+    supportedPlatforms: ['github', 'gitlab'],
     experimental: true,
   },
   {

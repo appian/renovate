@@ -7,9 +7,12 @@ import {
   CONFIG_GIT_URL_UNAVAILABLE,
   REPOSITORY_ACCESS_FORBIDDEN,
   REPOSITORY_ARCHIVED,
+  REPOSITORY_CANNOT_FORK,
   REPOSITORY_CHANGED,
   REPOSITORY_DISABLED,
   REPOSITORY_EMPTY,
+  REPOSITORY_FORKED,
+  REPOSITORY_FORK_MISSING,
   REPOSITORY_MIRRORED,
   REPOSITORY_NOT_FOUND,
   TEMPORARY_ERROR,
@@ -88,6 +91,10 @@ let config: {
   cloneSubmodulesFilter: string[] | undefined;
   ignorePrAuthor: boolean | undefined;
   squash: boolean;
+  forkOrg?: string;
+  forkToken?: string;
+  parentRepo?: string;
+  mergeRequestRepository?: string;
 } = {} as any;
 
 export function resetPlatform(): void {
@@ -320,6 +327,76 @@ function getRepoUrl(
   return URL.format(repoUrl);
 }
 
+export async function listForks(
+  repository: string,
+  token?: string,
+): Promise<RepoResponse[]> {
+  try {
+    // Get list of existing forks
+    const url = `projects/${urlEscape(repository)}/forks?per_page=100`;
+    const options: any = {};
+    if (token) {
+      options.token = token;
+    }
+    const forks = (
+      await gitlabApi.getJsonUnchecked<RepoResponse[]>(url, options)
+    ).body;
+    logger.debug(`Found ${forks.length} forked repo(s)`);
+    return forks;
+  } catch (err) /* istanbul ignore next */ {
+    if (err.statusCode === 404) {
+      logger.debug('Cannot list repo forks - it is likely private');
+    } else {
+      logger.debug({ err }, 'Unknown error listing repository forks');
+    }
+    throw new Error(REPOSITORY_CANNOT_FORK);
+  }
+}
+
+export async function findFork(
+  repository: string,
+  forkOrg?: string,
+  token?: string,
+): Promise<RepoResponse | null> {
+  const forks = await listForks(repository, token);
+  if (forkOrg) {
+    logger.debug(`Searching for forked repo in forkOrg (${forkOrg})`);
+    const forkedRepo = forks.find((repo) =>
+      repo.path_with_namespace.startsWith(`${forkOrg}/`),
+    );
+    if (forkedRepo) {
+      logger.debug(`Found repo in forkOrg: ${forkedRepo.path_with_namespace}`);
+      return forkedRepo;
+    }
+    logger.debug(`No repo found in forkOrg`);
+  }
+  logger.debug(`Searching for forked repo in user account`);
+  try {
+    // Get current user info to find user's fork
+    const options: any = {};
+    if (token) {
+      options.token = token;
+    }
+    const user = (
+      await gitlabApi.getJsonUnchecked<{ username: string }>('user', options)
+    ).body;
+    const forkedRepo = forks.find((repo) =>
+      repo.path_with_namespace.startsWith(`${user.username}/`),
+    );
+    if (forkedRepo) {
+      logger.debug(
+        `Found repo in user account: ${forkedRepo.path_with_namespace}`,
+      );
+      return forkedRepo;
+    }
+  } catch (err) /* istanbul ignore next */ {
+    logger.debug({ err }, 'Error getting user info for fork search');
+    throw new Error(REPOSITORY_CANNOT_FORK);
+  }
+  logger.debug(`No repo found in user account`);
+  return null;
+}
+
 // Initialize GitLab by getting base branch
 export async function initRepo({
   repository,
@@ -329,6 +406,8 @@ export async function initRepo({
   gitUrl,
   endpoint,
   includeMirrors,
+  forkOrg,
+  forkToken,
 }: RepoParams): Promise<RepoResult> {
   config = {} as any;
   config.repository = urlEscape(repository);
@@ -383,12 +462,60 @@ export async function initRepo({
         res.body.squash_option === 'default_on';
     }
     logger.debug(`${repository} default branch = ${config.defaultBranch}`);
+
+    // Fork mode logic
+    if (forkToken) {
+      logger.debug('Bot is in fork mode');
+
+      // Validate we're not running on a repository that is already a fork
+      if (res.body.forked_from_project) {
+        logger.debug(
+          'Repository is already a fork - cannot run fork mode on a fork',
+        );
+        throw new Error(REPOSITORY_FORKED);
+      }
+
+      config.forkOrg = forkOrg;
+      config.forkToken = forkToken;
+      // Save parent repository for merge request targeting (use original non-escaped name)
+      config.parentRepo = repository;
+      config.mergeRequestRepository = config.parentRepo;
+
+      const forkedRepo = await findFork(repository, forkOrg, forkToken);
+      if (!forkedRepo) {
+        logger.debug(
+          'Forked repo is not found and fork creation is out of scope',
+        );
+        throw new Error(REPOSITORY_FORK_MISSING);
+      }
+      logger.debug(`Using existing fork: ${forkedRepo.path_with_namespace}`);
+
+      // Fork synchronization will be handled at the git level after git.initRepo
+      // by setting up the upstream remote and syncing branches
+
+      // Update config to point to the fork repository
+      const forkRepository = forkedRepo.path_with_namespace;
+      config.repository = urlEscape(forkRepository);
+    }
     logger.debug('Enabling Git FS');
-    const url = getRepoUrl(repository, gitUrl, res);
+    let repoUrl: string;
+    if (forkToken && config.repository) {
+      // In fork mode, we need to get the fork repository details for the git URL
+      const forkRes = await gitlabApi.getJsonUnchecked<RepoResponse>(
+        `projects/${config.repository}`,
+      );
+      repoUrl = getRepoUrl(config.repository, gitUrl, forkRes);
+    } else {
+      repoUrl = getRepoUrl(repository, gitUrl, res);
+    }
+
     await git.initRepo({
       ...config,
-      url,
+      url: repoUrl,
     });
+    // TODO: Implement fork synchronization with upstream
+    // For now, fork mode will work with the current state of the fork
+    // Future enhancement: Add git-level upstream synchronization
   } catch (err) /* v8 ignore start */ {
     logger.debug({ err }, 'Caught initRepo error');
     if (err.message.includes('HEAD is not a symbolic ref')) {
@@ -411,7 +538,7 @@ export async function initRepo({
   } /* v8 ignore stop */
   const repoConfig: RepoResult = {
     defaultBranch: config.defaultBranch,
-    isFork: !!res.body.forked_from_project,
+    isFork: forkToken ? true : !!res.body.forked_from_project,
     repoFingerprint: repoFingerprint(res.body.id, defaults.endpoint),
   };
   return repoConfig;
@@ -751,18 +878,34 @@ export async function createPr({
   }
   const description = sanitize(rawDescription);
   logger.debug(`Creating Merge Request: ${title}`);
+
+  // Prepare the merge request body
+  const mrBody: any = {
+    source_branch: sourceBranch,
+    target_branch: targetBranch,
+    remove_source_branch: true,
+    title,
+    description,
+    labels: (labels ?? []).join(','),
+    squash: config.squash,
+  };
+
+  // In fork mode, set target_project_id to the upstream repository
+  if (config.parentRepo) {
+    // Get the upstream project ID
+    const upstreamRes = await gitlabApi.getJsonUnchecked<RepoResponse>(
+      `projects/${urlEscape(config.parentRepo)}`,
+    );
+    mrBody.target_project_id = upstreamRes.body.id;
+    logger.debug(
+      `Fork mode: targeting upstream project ${config.parentRepo} (ID: ${upstreamRes.body.id})`,
+    );
+  }
+
   const res = await gitlabApi.postJson<GitLabMergeRequest>(
     `projects/${config.repository}/merge_requests`,
     {
-      body: {
-        source_branch: sourceBranch,
-        target_branch: targetBranch,
-        remove_source_branch: true,
-        title,
-        description,
-        labels: (labels ?? []).join(','),
-        squash: config.squash,
-      },
+      body: mrBody,
     },
   );
 

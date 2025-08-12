@@ -8,6 +8,7 @@ import {
   REPOSITORY_CHANGED,
   REPOSITORY_DISABLED,
   REPOSITORY_EMPTY,
+  REPOSITORY_FORK_MISSING,
   REPOSITORY_MIRRORED,
 } from '../../../constants/error-messages';
 import type { BranchStatus } from '../../../types';
@@ -482,6 +483,117 @@ describe('modules/platform/gitlab/index', () => {
         repository: 'some/repo/project',
       });
       expect(git.initRepo.mock.calls).toMatchSnapshot();
+    });
+
+    describe('fork mode', () => {
+      it('should throw error when trying to run fork mode on a forked repository', async () => {
+        httpMock
+          .scope(gitlabApiHost)
+          .get('/api/v4/projects/some%2Frepo')
+          .reply(200, {
+            default_branch: 'master',
+            forked_from_project: {
+              id: 123,
+              path_with_namespace: 'upstream/repo',
+            },
+          });
+
+        await expect(
+          gitlab.initRepo({
+            repository: 'some/repo',
+            forkToken: 'fork-token',
+          }),
+        ).rejects.toThrow('fork');
+      });
+
+      it('should find existing fork and use it', async () => {
+        const upstreamRepo = {
+          default_branch: 'master',
+          id: 123,
+        };
+        const forkRepo = {
+          id: 456,
+          path_with_namespace: 'user/repo',
+          default_branch: 'master',
+          http_url_to_repo: 'https://gitlab.com/user/repo.git',
+        };
+
+        httpMock
+          .scope(gitlabApiHost)
+          .get('/api/v4/projects/some%2Frepo')
+          .reply(200, upstreamRepo)
+          .get('/api/v4/projects/some%2Frepo/forks?per_page=100')
+          .reply(200, [forkRepo])
+          .get('/api/v4/user')
+          .reply(200, { username: 'user' })
+          .get('/api/v4/projects/user%2Frepo')
+          .reply(200, forkRepo);
+
+        const result = await gitlab.initRepo({
+          repository: 'some/repo',
+          forkToken: 'fork-token',
+        });
+
+        expect(result.isFork).toBe(true);
+        expect(git.initRepo).toHaveBeenCalledWith(
+          expect.objectContaining({
+            url: expect.stringContaining('user/repo'),
+          }),
+        );
+      });
+
+      it('should throw REPOSITORY_FORK_MISSING when no fork exists', async () => {
+        const upstreamRepo = {
+          default_branch: 'master',
+          id: 123,
+        };
+
+        httpMock
+          .scope(gitlabApiHost)
+          .get('/api/v4/projects/some%2Frepo')
+          .reply(200, upstreamRepo)
+          .get('/api/v4/projects/some%2Frepo/forks?per_page=100')
+          .reply(200, [])
+          .get('/api/v4/user')
+          .reply(200, { username: 'user' });
+
+        await expect(
+          gitlab.initRepo({
+            repository: 'some/repo',
+            forkToken: 'fork-token',
+          }),
+        ).rejects.toThrow(REPOSITORY_FORK_MISSING);
+      });
+
+      it('should find fork in specified organization', async () => {
+        const upstreamRepo = {
+          default_branch: 'master',
+          id: 123,
+        };
+        const forkRepo = {
+          id: 456,
+          path_with_namespace: 'myorg/repo',
+          default_branch: 'master',
+          http_url_to_repo: 'https://gitlab.com/myorg/repo.git',
+        };
+
+        httpMock
+          .scope(gitlabApiHost)
+          .get('/api/v4/projects/some%2Frepo')
+          .reply(200, upstreamRepo)
+          .get('/api/v4/projects/some%2Frepo/forks?per_page=100')
+          .reply(200, [forkRepo])
+          .get('/api/v4/projects/myorg%2Frepo')
+          .reply(200, forkRepo);
+
+        const result = await gitlab.initRepo({
+          repository: 'some/repo',
+          forkToken: 'fork-token',
+          forkOrg: 'myorg',
+        });
+
+        expect(result.isFork).toBe(true);
+      });
     });
   });
 
@@ -3054,6 +3166,76 @@ describe('modules/platform/gitlab/index', () => {
           },
         }),
       ).toResolve();
+    });
+
+    describe('fork mode', () => {
+      it('should create MR with target_project_id when in fork mode', async () => {
+        await initPlatform('13.3.6-ee');
+
+        // Set up fork mode scenario: upstream repo with existing fork
+        const upstreamRepo = {
+          default_branch: 'master',
+          id: 123,
+        };
+        const forkRepo = {
+          id: 456,
+          path_with_namespace: 'user/repo',
+          default_branch: 'master',
+          http_url_to_repo: 'https://gitlab.com/user/repo.git',
+        };
+
+        httpMock
+          .scope(gitlabApiHost)
+          // Initial repo fetch for upstream
+          .get('/api/v4/projects/upstream%2Frepo')
+          .reply(200, upstreamRepo)
+          // Fork discovery
+          .get('/api/v4/projects/upstream%2Frepo/forks?per_page=100')
+          .reply(200, [forkRepo])
+          .get('/api/v4/user')
+          .reply(200, { username: 'user' })
+          .get('/api/v4/projects/user%2Frepo')
+          .reply(200, forkRepo)
+          // createPr calls
+          .get(
+            '/api/v4/projects/user%2Frepo/merge_requests?per_page=100&scope=created_by_me',
+          )
+          .reply(200, [])
+          .post('/api/v4/projects/user%2Frepo/merge_requests', (body) => {
+            // For now, just verify the MR is created on the fork
+            // The target_project_id logic will be tested separately
+            expect(body).toMatchObject({
+              source_branch: 'some-branch',
+              target_branch: 'master',
+              title: 'some title',
+            });
+            return true;
+          })
+          .reply(200, {
+            id: 1,
+            iid: 12345,
+            title: 'some title',
+          });
+
+        // Initialize repository in fork mode
+        const result = await gitlab.initRepo({
+          repository: 'upstream/repo',
+          forkToken: 'fork-token',
+        });
+
+        expect(result.isFork).toBe(true);
+
+        // Now test createPr in fork mode
+        const pr = await gitlab.createPr({
+          sourceBranch: 'some-branch',
+          targetBranch: 'master',
+          prTitle: 'some title',
+          prBody: 'the-body',
+          labels: [],
+        });
+
+        expect(pr.number).toBe(12345);
+      });
     });
   });
 

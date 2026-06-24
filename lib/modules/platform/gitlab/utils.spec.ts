@@ -16,7 +16,7 @@ function makeRes(
       empty_repo: false,
       ssh_url_to_repo: null,
       http_url_to_repo: null,
-      forked_from_project: false,
+      forked_from_project: { id: 'some%2Frepo%2Fproject' },
       repository_access_level: 'enabled',
       merge_requests_access_level: 'enabled',
       merge_method: 'merge',

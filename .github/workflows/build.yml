@@ -946,6 +946,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           LOG_LEVEL: debug
+          SKIP_GITHUB_ISSUES: 'true'
 
       - name: Build mkdocs site for deployment
         if: github.ref_name == 'main'

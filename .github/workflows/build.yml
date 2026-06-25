@@ -1031,6 +1031,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           LOG_LEVEL: debug
+          # The appian fork has issues disabled.
           SKIP_GITHUB_ISSUES: 'true'
 
       # a failed attestation shows as an error but doesn't fail the release

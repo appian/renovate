@@ -916,6 +916,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           LOG_LEVEL: debug
+          # The appian fork has issues disabled.
           SKIP_GITHUB_ISSUES: 'true'
 
       - name: Build mkdocs site for deployment

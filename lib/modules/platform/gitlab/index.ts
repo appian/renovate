@@ -565,7 +565,7 @@ export async function getBranchStatus(
 export async function getPrList(): Promise<Pr[]> {
   return await GitlabPrCache.getPrs(
     gitlabApi,
-    config.repository,
+    config.mergeRequestRepository,
     botUserName,
     !!config.ignorePrAuthor,
   );
@@ -804,7 +804,7 @@ export async function createPr({
   const pr = prInfo(res.body);
   await GitlabPrCache.setPr(
     gitlabApi,
-    config.repository,
+    config.mergeRequestRepository,
     botUserName,
     pr,
     !!config.ignorePrAuthor,
@@ -993,7 +993,7 @@ export async function findPr({
   if (includeOtherAuthors) {
     // PR might have been created by anyone, so don't use the cached Renovate MR list
     const response = await gitlabApi.getJsonUnchecked<GitLabMergeRequest[]>(
-      `projects/${config.repository}/merge_requests?source_branch=${branchName}&state=opened`,
+      `projects/${config.mergeRequestRepository}/merge_requests?source_branch=${branchName}&state=opened`,
     );
 
     const { body: mrList } = response;
@@ -1248,12 +1248,15 @@ export async function ensureIssue({
         return 'updated';
       }
     } else {
-      await gitlabApi.postJson(`projects/${config.mergeRequestRepository}/issues`, {
-        body: {
-          title,
-          description,
-          labels: coerceArray(labels).join(','),
-          confidential: confidential ?? false,
+      await gitlabApi.postJson(
+        `projects/${config.mergeRequestRepository}/issues`,
+        {
+          body: {
+            title,
+            description,
+            labels: coerceArray(labels).join(','),
+            confidential: confidential ?? false,
+          },
         },
       );
       logger.info('Issue created');
@@ -1304,7 +1307,7 @@ export async function addAssignees(
       }
     }
     const url = `projects/${
-      config.repository
+      config.mergeRequestRepository
     }/merge_requests/${iid}?${getQueryString({
       'assignee_ids[]': assigneeIds,
     })}`;
@@ -1331,7 +1334,7 @@ export async function addReviewers(
 
   let mr: GitLabMergeRequest;
   try {
-    mr = await getMR(config.repository, iid);
+    mr = await getMR(config.mergeRequestRepository, iid);
   } catch (err) {
     logger.warn({ err }, 'Failed to get existing reviewers');
     return;
@@ -1489,13 +1492,13 @@ export async function ensureComment({
   if (!commentId) {
     await addComment(number, body);
     logger.debug(
-      { repository: config.repository, issueNo: number },
+      { repository: config.mergeRequestRepository, issueNo: number },
       'Added comment',
     );
   } else if (commentNeedsUpdating) {
     await editComment(number, commentId, body);
     logger.debug(
-      { repository: config.repository, issueNo: number },
+      { repository: config.mergeRequestRepository, issueNo: number },
       'Updated comment',
     );
   } else {

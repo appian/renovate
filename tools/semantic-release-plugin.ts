@@ -91,10 +91,7 @@ export async function publish(
     if (!digest) {
       throw commandError(`Missing image digest for push-${variant}`);
     }
-    images.push(
-      `ghcr.io/renovatebot/renovate@${digest}`,
-      `renovate/renovate@${digest}`,
-    );
+    images.push(`ghcr.io/appian/renovate@${digest}`);
     // the release workflow attests the images by these digests
     if (process.env.GITHUB_OUTPUT) {
       await fs.appendFile(
